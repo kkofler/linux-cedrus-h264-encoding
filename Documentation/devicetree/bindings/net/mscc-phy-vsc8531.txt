@@ -31,6 +31,7 @@ Optional properties:
 			  VSC8531_LINK_100_ACTIVITY (2),
 			  VSC8531_LINK_ACTIVITY (0) and
 			  VSC8531_DUPLEX_COLLISION (8).
+- vsc8584,los-active-low : If set, indicates the LOS pin is active low.
 
 
 Table: 1 - Edge rate change
