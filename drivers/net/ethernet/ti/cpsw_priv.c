@@ -15,6 +15,7 @@
 #include <linux/net_tstamp.h>
 #include <linux/of.h>
 #include <linux/phy.h>
+#include <linux/phylink.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/skbuff.h>
@@ -293,11 +294,23 @@ void cpsw_ndo_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 
 static int cpsw_get_common_speed(struct cpsw_common *cpsw)
 {
+	struct phy_device *phydev;
 	int i, speed;
 
-	for (i = 0, speed = 0; i < cpsw->data.slaves; i++)
-		if (cpsw->slaves[i].phy && cpsw->slaves[i].phy->link)
-			speed += cpsw->slaves[i].phy->speed;
+	for (i = 0, speed = 0; i < cpsw->data.slaves; i++) {
+		if (cpsw->slaves[i].phy) {
+			if (cpsw->slaves[i].phy->link)
+				speed += cpsw->slaves[i].phy->speed;
+			continue;
+		}
+
+		if (!cpsw->slaves[i].phylink)
+			continue;
+
+		phydev = phylink_get_phy_device(cpsw->slaves[i].phylink);
+		if (phydev->link)
+			speed += phydev->speed;
+	}
 
 	return speed;
 }
@@ -711,7 +724,7 @@ int cpsw_ndo_ioctl(struct net_device *dev, struct ifreq *req, int cmd)
 
 	if (!cpsw->slaves[slave_no].phy)
 		return -EOPNOTSUPP;
-	return phy_mii_ioctl(cpsw->slaves[slave_no].phy, req, cmd);
+	return phylink_mii_ioctl(cpsw->slaves[slave_no].phylink, req, cmd);
 }
 
 int cpsw_ndo_set_tx_maxrate(struct net_device *ndev, int queue, u32 rate)
