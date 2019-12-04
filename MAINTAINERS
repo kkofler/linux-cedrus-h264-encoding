@@ -13943,6 +13943,17 @@ S:	Maintained
 F:	drivers/staging/media/hantro/
 F:	Documentation/devicetree/bindings/media/rockchip-vpu.txt
 
+ROCKCHIP PMIC DRIVERS
+M:	Heiko Stuebner <heiko@sntech.de>
+L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
+L:	linux-rockchip@lists.infradead.org
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip.git
+S:	Maintained
+F:	Documentation/devicetree/bindings/*/*rk8*
+F:	include/*/*/rk8*
+F:	include/*/*/*/rk8*
+F:	drivers/*/*rk8*
+
 ROCKER DRIVER
 M:	Jiri Pirko <jiri@resnulli.us>
 L:	netdev@vger.kernel.org
