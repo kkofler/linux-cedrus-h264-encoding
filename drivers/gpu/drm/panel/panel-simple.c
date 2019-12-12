@@ -38,6 +38,9 @@
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
 
+#define MIN_DEFAULT_RESET_US 10
+#define MIN_DEFAULT_WAIT_US 10
+
 /**
  * @modes: Pointer to array of fixed modes appropriate for this panel.  If
  *         only one mode then this can just be the address of this the mode.
@@ -94,7 +97,12 @@ struct panel_desc {
 
 	u32 bus_format;
 	u32 bus_flags;
+
 	int connector_type;
+
+	/* Minimum reset duration and wait period after it in us */
+	u32 reset_time;
+	u32 reset_wait;
 };
 
 struct panel_simple {
@@ -110,6 +118,7 @@ struct panel_simple {
 	struct i2c_adapter *ddc;
 
 	struct gpio_desc *enable_gpio;
+	struct gpio_desc *reset_gpio;
 
 	struct drm_display_mode override_mode;
 };
@@ -433,12 +442,34 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc)
 	if (IS_ERR(panel->supply))
 		return PTR_ERR(panel->supply);
 
+	panel->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+						    GPIOD_OUT_HIGH);
+	if (IS_ERR(panel->reset_gpio)) {
+		err = PTR_ERR(panel->reset_gpio);
+		if (err != -EPROBE_DEFER)
+			dev_err(dev, "failed to request reset pin: %d\n", err);
+		return err;
+	} else if (panel->reset_gpio) {
+		u32 reset_time = panel->desc->reset_time;
+		u32 reset_wait = panel->desc->reset_wait;
+
+		if (!reset_time)
+			reset_time = MIN_DEFAULT_RESET_US;
+
+		if (!reset_wait)
+			reset_wait = MIN_DEFAULT_WAIT_US;
+
+		usleep_range(reset_time, 2 * reset_time);
+		gpiod_set_value_cansleep(panel->reset_gpio, 0);
+		usleep_range(reset_wait, 2 * reset_wait);
+	}
+
 	panel->enable_gpio = devm_gpiod_get_optional(dev, "enable",
 						     GPIOD_OUT_LOW);
 	if (IS_ERR(panel->enable_gpio)) {
 		err = PTR_ERR(panel->enable_gpio);
 		if (err != -EPROBE_DEFER)
-			dev_err(dev, "failed to request GPIO: %d\n", err);
+			dev_err(dev, "failed to request enable pin: %d\n", err);
 		return err;
 	}
 
