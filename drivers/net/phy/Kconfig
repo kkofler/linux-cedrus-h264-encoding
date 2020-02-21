@@ -196,6 +196,16 @@ config MDIO_OCTEON
 	  buses. It is required by the Octeon and ThunderX ethernet device
 	  drivers on some systems.
 
+config MDIO_SMBUS
+	tristate
+	depends on I2C_SMBUS
+	help
+	  Support SMBus based PHYs. This provides a MDIO bus bridged
+	  to SMBus to allow PHYs connected in SMBus mode to be accessed
+	  using the existing infrastructure.
+
+	  This is library mode.
+
 config MDIO_SUN4I
 	tristate "Allwinner sun4i MDIO interface support"
 	depends on ARCH_SUNXI || COMPILE_TEST
@@ -278,6 +288,7 @@ config SFP
 	depends on I2C && PHYLINK
 	depends on HWMON || HWMON=n
 	select MDIO_I2C
+	select MDIO_SMBUS
 
 config ADIN_PHY
 	tristate "Analog Devices Industrial Ethernet PHYs"

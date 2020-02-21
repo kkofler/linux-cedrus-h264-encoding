@@ -14,21 +14,6 @@
 
 #include "mdio-i2c.h"
 
-/*
- * I2C bus addresses 0x50 and 0x51 are normally an EEPROM, which is
- * specified to be present in SFP modules.  These correspond with PHY
- * addresses 16 and 17.  Disallow access to these "phy" addresses.
- */
-static bool i2c_mii_valid_phy_id(int phy_id)
-{
-	return phy_id != 0x10 && phy_id != 0x11;
-}
-
-static unsigned int i2c_mii_phy_addr(int phy_id)
-{
-	return phy_id + 0x40;
-}
-
 static int i2c_mii_read(struct mii_bus *bus, int phy_id, int reg)
 {
 	struct i2c_adapter *i2c = bus->priv;
