@@ -259,6 +259,12 @@ void sfp_parse_support(struct sfp_bus *bus, const struct sfp_eeprom_id *id,
 		phylink_set(modes, 1000baseT_Half);
 		phylink_set(modes, 1000baseT_Full);
 	}
+	if (id->base.e100_base_fx ||
+	    id->base.e100_base_lx ||
+	    br_max == 100) {
+		phylink_set(modes, 100baseT_Half);
+		phylink_set(modes, 100baseT_Full);
+	}
 
 	/* 1000Base-PX or 1000Base-BX10 */
 	if ((id->base.e_base_px || id->base.e_base_bx10) &&
