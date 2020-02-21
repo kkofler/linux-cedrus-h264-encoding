@@ -14,6 +14,7 @@
 #include <linux/compiler.h>
 #include <linux/spinlock.h>
 #include <linux/ethtool.h>
+#include <linux/i2c.h>
 #include <linux/linkmode.h>
 #include <linux/mdio.h>
 #include <linux/mii.h>
@@ -652,6 +653,8 @@ struct phy_driver {
 			    struct ethtool_tunable *tuna,
 			    const void *data);
 	int (*set_loopback)(struct phy_device *dev, bool enable);
+
+	int (*i2c_xfer)(struct phy_device *dev, struct i2c_msg msgs[], int num);
 };
 #define to_phy_driver(d) container_of(to_mdio_common_driver(d),		\
 				      struct phy_driver, mdiodrv)
@@ -692,6 +695,7 @@ size_t phy_speeds(unsigned int *speeds, size_t size,
 void of_set_phy_supported(struct phy_device *phydev);
 void of_set_phy_eee_broken(struct phy_device *phydev);
 int phy_speed_down_core(struct phy_device *phydev);
+int of_phy_init_i2c(struct device *dev, struct device_node *node);
 
 /**
  * phy_is_started - Convenience function to check whether PHY is started

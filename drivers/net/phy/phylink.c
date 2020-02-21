@@ -767,6 +767,11 @@ struct phylink *phylink_create(struct phylink_config *config,
 
 	pl->cur_link_an_mode = pl->cfg_link_an_mode;
 
+	if (config->type == PHYLINK_NETDEV)
+		of_phy_init_i2c(&pl->netdev->dev, to_of_node(fwnode));
+	else
+		of_phy_init_i2c(pl->dev, to_of_node(fwnode));
+
 	ret = phylink_register_sfp(pl, fwnode);
 	if (ret < 0) {
 		kfree(pl);

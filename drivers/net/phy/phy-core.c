@@ -5,6 +5,7 @@
 #include <linux/export.h>
 #include <linux/phy.h>
 #include <linux/of.h>
+#include <linux/i2c.h>
 
 const char *phy_speed_to_str(int speed)
 {
@@ -302,6 +303,61 @@ void phy_resolve_aneg_pause(struct phy_device *phydev)
 	}
 }
 EXPORT_SYMBOL_GPL(phy_resolve_aneg_pause);
+
+static int mdio_i2c_master_xfer(struct i2c_adapter *adap,
+			        struct i2c_msg msgs[], int num)
+{
+	struct phy_device *phydev = adap->algo_data;
+
+	if (!phydev->drv->i2c_xfer)
+		return -EOPNOTSUPP;
+
+	return phydev->drv->i2c_xfer(phydev, msgs, num);
+}
+
+static u32 mdio_i2c_func(struct i2c_adapter *adapter)
+{
+	return I2C_FUNC_I2C;
+}
+
+/* I2C support */
+static struct i2c_algorithm mdio_i2c_algo = {
+	.master_xfer	= mdio_i2c_master_xfer,
+	.functionality	= mdio_i2c_func,
+};
+
+int of_phy_init_i2c(struct device *dev, struct device_node *node)
+{
+	struct device_node *i2c_node;
+	struct i2c_adapter *adap;
+	int ret;
+
+	/* This is optional */
+	i2c_node = of_find_node_by_name(node, "i2c-controller");
+	if (!i2c_node)
+		return 0;
+
+	adap = kzalloc(sizeof(*adap), GFP_KERNEL);
+	if (!adap)
+		return -ENOMEM;
+
+	adap->owner = THIS_MODULE;
+	adap->dev.of_node = i2c_node;
+	adap->algo = &mdio_i2c_algo;
+	adap->timeout = msecs_to_jiffies(1000);
+	adap->retries = 3;
+	adap->algo_data = dev;
+	adap->dev.parent = dev;
+	strcpy(adap->name, "mdio-i2c");
+
+	ret = i2c_add_adapter(adap);
+	pr_info("%s : Added mdio i2c adapter : %d\n", __func__, ret);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+EXPORT_SYMBOL(of_phy_init_i2c);
 
 /**
  * phy_resolve_aneg_linkmode - resolve the advertisements into phy settings
