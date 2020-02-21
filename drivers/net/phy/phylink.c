@@ -1618,6 +1618,13 @@ int phylink_ethtool_set_eee(struct phylink *pl, struct ethtool_eee *eee)
 }
 EXPORT_SYMBOL_GPL(phylink_ethtool_set_eee);
 
+/* NOT FOR MAINLINE */
+struct phy_device *phylink_get_phy_device(struct phylink *pl)
+{
+	return pl->phydev;
+}
+EXPORT_SYMBOL_GPL(phylink_get_phy_device);
+
 /* This emulates MII registers for a fixed-mode phy operating as per the
  * passed in state. "aneg" defines if we report negotiation is possible.
  *
