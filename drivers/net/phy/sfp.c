@@ -1790,6 +1790,13 @@ static void sfp_sm_module(struct sfp *sfp, unsigned int event)
 		return;
 	}
 
+	/* Re-probe the SFP modules when an interface is brought up, as the MAC
+	 * do not report its link status (This means Phylink wouldn't be
+	 * triggered if the PHY had a link before a MAC is brought up).
+	 */
+	if (event == SFP_E_DEV_UP && sfp->sm_mod_state == SFP_MOD_PRESENT)
+		sfp_sm_mod_next(sfp, SFP_MOD_PROBE, T_SERIAL);
+
 	switch (sfp->sm_mod_state) {
 	default:
 		if (event == SFP_E_INSERT) {
