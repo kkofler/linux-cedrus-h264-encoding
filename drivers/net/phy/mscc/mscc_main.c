@@ -1329,6 +1329,7 @@ static bool vsc8584_is_pkg_init(struct phy_device *phydev, bool reversed)
 static int vsc8584_config_init(struct phy_device *phydev)
 {
 	struct vsc8531_private *vsc8531 = phydev->priv;
+	u32 media_mode = 0;
 	u16 addr, val;
 	int ret, i;
 
@@ -1452,11 +1453,18 @@ static int vsc8584_config_init(struct phy_device *phydev)
 	if (ret)
 		return ret;
 
+	if (of_property_read_bool(dev->of_node, "fiber-mode")) {
+		media_mode = MEDIA_OP_MODE_SERDES;
+		phydev->autoneg = AUTONEG_DISABLE;
+	} else {
+		media_mode = MEDIA_OP_MODE_COPPER;
+	}
+
 	phy_write(phydev, MSCC_EXT_PAGE_ACCESS, MSCC_PHY_PAGE_STANDARD);
 
 	val = phy_read(phydev, MSCC_PHY_EXT_PHY_CNTL_1);
 	val &= ~(MEDIA_OP_MODE_MASK | VSC8584_MAC_IF_SELECTION_MASK);
-	val |= (MEDIA_OP_MODE_COPPER << MEDIA_OP_MODE_POS) |
+	val |= (media_mode << MEDIA_OP_MODE_POS) |
 	       (VSC8584_MAC_IF_SELECTION_SGMII << VSC8584_MAC_IF_SELECTION_POS);
 	ret = phy_write(phydev, MSCC_PHY_EXT_PHY_CNTL_1, val);
 	if (ret)
