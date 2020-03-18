@@ -1329,6 +1329,7 @@ static bool vsc8584_is_pkg_init(struct phy_device *phydev, bool reversed)
 static int vsc8584_config_init(struct phy_device *phydev)
 {
 	struct vsc8531_private *vsc8531 = phydev->priv;
+	struct device *dev = &phydev->mdio.dev;
 	u32 media_mode = 0;
 	u16 addr, val;
 	int ret, i;
@@ -1477,6 +1478,11 @@ static int vsc8584_config_init(struct phy_device *phydev)
 		if (ret)
 			return ret;
 	}
+
+	if (of_property_read_bool(dev->of_node, "vsc8584,los-active-low"))
+		phy_modify_paged(phydev, MSCC_PHY_PAGE_EXTENDED,
+				 MSCC_PHY_EXT_MODE_CNTL, SIGDET_ACTIVE_LOW,
+				 SIGDET_ACTIVE_LOW);
 
 	ret = genphy_soft_reset(phydev);
 	if (ret)
