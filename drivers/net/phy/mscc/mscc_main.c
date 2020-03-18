@@ -14,8 +14,10 @@
 #include <linux/mdio.h>
 #include <linux/mii.h>
 #include <linux/phy.h>
+#include <linux/phylink.h>
 #include <linux/of.h>
 #include <linux/netdevice.h>
+#include <linux/sfp.h>
 #include <dt-bindings/net/mscc-phy-vsc8531.h>
 
 #include "mscc.h"
@@ -1347,6 +1349,8 @@ static int vsc8584_config_init(struct phy_device *phydev)
 	else
 		vsc8531->base_addr = phydev->mdio.addr - addr;
 
+	vsc8531->addr = addr;
+
 	/* Some parts of the init sequence are identical for every PHY in the
 	 * package. Some parts are modifying the GPIO register bank which is a
 	 * set of registers that are affecting all PHYs, a few resetting the
@@ -2004,12 +2008,119 @@ static int vsc8514_probe(struct phy_device *phydev)
 	return vsc85xx_dt_led_modes_get(phydev, default_mode);
 }
 
+static int vsc8574_module_insert(void *upstream, const struct sfp_eeprom_id *id)
+{
+	struct phy_device *phydev = upstream;
+	struct vsc8531_private *priv = phydev->priv;
+	u16 addr = priv->addr, media_mode = 0, serdes_mode = 0;
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(support) = { 0, };
+	int ret;
+
+	sfp_parse_support(phydev->sfp_bus, id, support);
+
+	if (phylink_test(support, 1000baseX_Full) ||
+	    phylink_test(support, 1000baseT_Full) ||
+	    phylink_test(support, 1000baseT_Half)) {
+		media_mode = MEDIA_OP_MODE_SERDES;
+		serdes_mode = PROC_CMD_FIBER_1000BASE_X;
+	} else if (phylink_test(support, 100baseT_Full) ||
+		   phylink_test(support, 100baseT_Half)) {
+		media_mode = MEDIA_OP_MODE_100BASEFX;
+		serdes_mode = PROC_CMD_FIBER_100BASE_FX;
+	} else {
+		dev_err(&phydev->mdio.dev, "SFP module not supported.");
+		return -EINVAL;
+	}
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+
+	/* Program the serdes mode */
+	ret = vsc8584_cmd(phydev, PROC_CMD_FIBER_MEDIA_CONF |
+			  PROC_CMD_FIBER_PORT(addr) |
+			  PROC_CMD_READ_MOD_WRITE_PORT |
+			  PROC_CMD_RST_CONF_PORT | serdes_mode);
+
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	if (ret)
+		goto err;
+
+	/* Program the media mode */
+	phy_modify(phydev, MSCC_PHY_EXT_PHY_CNTL_1, MEDIA_OP_MODE_MASK,
+		   media_mode << MEDIA_OP_MODE_POS);
+
+	/* Soft reset following the mode reconfiguration. */
+	genphy_soft_reset(phydev);
+
+	if (media_mode == MEDIA_OP_MODE_SERDES) {
+		/* Enable autoneg on both the media serdes and the MAC serdes,
+		 * as per the application note on the protocol transfer mode
+		 * (ENT-AN1175).
+		 */
+		phy_modify(phydev, MII_BMCR, BMCR_ANENABLE, BMCR_ANENABLE);
+
+		phy_modify_paged(phydev, MSCC_PHY_PAGE_EXTENDED_3,
+				 MSCC_MAC_SERDES_PCS_CTRL,
+				 MSCC_MAC_SERDES_PCS_CTRL_AN_EN,
+				 MSCC_MAC_SERDES_PCS_CTRL_AN_EN);
+	}
+
+	return 0;
+
+err:
+	dev_err(&phydev->mdio.dev, "Failed to reconfigure media interface.");
+	return ret;
+}
+
+static void vsc8574_module_remove(void *upstream)
+{
+	struct phy_device *phydev = upstream;
+	struct vsc8531_private *priv = phydev->priv;
+	u16 addr = priv->addr;
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+
+	/* Disable SerDes for 100Base-X */
+	vsc8584_cmd(phydev, PROC_CMD_FIBER_MEDIA_CONF |
+		    PROC_CMD_FIBER_PORT(addr) | PROC_CMD_FIBER_DISABLE |
+		    PROC_CMD_READ_MOD_WRITE_PORT |
+		    PROC_CMD_RST_CONF_PORT | PROC_CMD_FIBER_100BASE_FX);
+
+	/* Disable SerDes for 1000Base-X */
+	vsc8584_cmd(phydev, PROC_CMD_FIBER_MEDIA_CONF |
+		    PROC_CMD_FIBER_PORT(addr) | PROC_CMD_FIBER_DISABLE |
+		    PROC_CMD_READ_MOD_WRITE_PORT |
+		    PROC_CMD_RST_CONF_PORT | PROC_CMD_FIBER_1000BASE_X);
+
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	/* Program the media mode to serdes by default */
+	phy_modify(phydev, MSCC_PHY_EXT_PHY_CNTL_1, MEDIA_OP_MODE_MASK,
+		   MEDIA_OP_MODE_SERDES << MEDIA_OP_MODE_POS);
+
+	/* Soft reset following the mode reconfiguration. */
+	genphy_soft_reset(phydev);
+
+	/* Disable autoneg by default */
+	phy_modify_paged(phydev, MSCC_PHY_PAGE_EXTENDED_3,
+			 MSCC_MAC_SERDES_PCS_CTRL,
+			 MSCC_MAC_SERDES_PCS_CTRL_AN_EN, 0);
+}
+
+static const struct sfp_upstream_ops vsc8574_sfp_ops = {
+	.attach = phy_sfp_attach,
+	.detach = phy_sfp_detach,
+	.module_insert = vsc8574_module_insert,
+	.module_remove = vsc8574_module_remove,
+};
+
 static int vsc8574_probe(struct phy_device *phydev)
 {
 	struct vsc8531_private *vsc8531;
 	u32 default_mode[4] = {VSC8531_LINK_1000_ACTIVITY,
 	   VSC8531_LINK_100_ACTIVITY, VSC8531_LINK_ACTIVITY,
 	   VSC8531_DUPLEX_COLLISION};
+	int ret;
 
 	vsc8531 = devm_kzalloc(&phydev->mdio.dev, sizeof(*vsc8531), GFP_KERNEL);
 	if (!vsc8531)
@@ -2026,7 +2137,11 @@ static int vsc8574_probe(struct phy_device *phydev)
 	if (!vsc8531->stats)
 		return -ENOMEM;
 
-	return vsc85xx_dt_led_modes_get(phydev, default_mode);
+	ret = vsc85xx_dt_led_modes_get(phydev, default_mode);
+	if (ret)
+		return ret;
+
+	return phy_sfp_probe(phydev, &vsc8574_sfp_ops);
 }
 
 static int vsc8584_probe(struct phy_device *phydev)
