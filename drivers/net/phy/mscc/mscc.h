@@ -253,6 +253,13 @@ enum rgmii_clock_delay {
 #define MAC_CFG_QSGMII			  0x4000
 #define MAC_CFG_RGMII			  0x8000
 
+#define MSCC_TWI_MUX_CTL1		  20
+#define TW_MUX_PORT_EN(x)		  (0x1 << (x))
+#define TW_MUX_PORT_MASK		  0xf
+
+#define MSCC_TWI_MUX_CTL2		  21
+#define MSCC_TWI_MUX_RW			  22
+
 /* Test page Registers */
 #define MSCC_PHY_TEST_PAGE_5		  5
 #define MSCC_PHY_TEST_PAGE_8		  8
@@ -376,6 +383,9 @@ struct vsc8531_private {
 	unsigned long ingr_flows;
 	unsigned long egr_flows;
 #endif
+
+	struct i2c_adapter *i2c;
+	struct phy_device *phydev;
 };
 
 #ifdef CONFIG_OF_MDIO

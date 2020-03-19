@@ -7,7 +7,9 @@
  * Copyright (c) 2016 Microsemi Corporation
  */
 
+#include <linux/delay.h>
 #include <linux/firmware.h>
+#include <linux/i2c.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -1326,6 +1328,134 @@ static bool vsc8584_is_pkg_init(struct phy_device *phydev, bool reversed)
 	return false;
 }
 
+static int vsc8572_smbus_wait(struct phy_device *phydev)
+{
+	int timeout = 10;
+	u32 val;
+
+	do {
+		val = phy_read(phydev, MSCC_TWI_MUX_CTL2);
+		if (val & BIT(15))
+			return 0;
+
+		usleep_range(1000, 2000);
+	} while (--timeout);
+
+	phydev_err(phydev, "I2C not ready, timed out.");
+	return -ETIMEDOUT;
+}
+
+static int vsc8572_smbus_rx(struct phy_device *phydev, __u8 *byte)
+{
+	int ret;
+
+	/* Enable MUX access for read & start read sequence */
+	ret = phy_modify(phydev, MSCC_TWI_MUX_CTL2, BIT(8) | BIT(9),
+			 BIT(8) | BIT(9));
+	if (ret < 0)
+		return ret;
+
+	/* Wait for the data to be available */
+	ret = vsc8572_smbus_wait(phydev);
+	if (ret < 0)
+		return ret;
+
+	/* Read the data */
+	ret = phy_read(phydev, MSCC_TWI_MUX_RW);
+	if (ret < 0)
+		return ret;
+
+	*byte = (ret & 0xff00) >> 8;
+	return 0;
+}
+
+static int vsc8572_smbus_tx(struct phy_device *phydev, __u8 byte)
+{
+	int ret;
+
+	/* Enable MUX access for write */
+	ret = phy_clear_bits(phydev, MSCC_TWI_MUX_CTL2, BIT(8));
+	if (ret < 0)
+		return ret;
+
+	/* Data to be written */
+	ret = phy_write(phydev, MSCC_TWI_MUX_RW, byte);
+	if (ret < 0)
+		return ret;
+
+	/* Start write sequence */
+	ret = phy_set_bits(phydev, MSCC_TWI_MUX_CTL2, BIT(9));
+	if (ret < 0)
+		return ret;
+
+	/* Wait for the data to be written */
+	return vsc8572_smbus_wait(phydev);
+}
+
+static int vsc8572_smbus_xfer(struct i2c_adapter *adapter, u16 addr,
+			      unsigned short flags, char read_write, u8 command,
+			      int size, union i2c_smbus_data *data)
+{
+	struct vsc8531_private *priv = adapter->algo_data;
+	struct phy_device *phydev = priv->phydev;
+	int ret = 0;
+
+	if (!priv->pkg_init)
+		return -EOPNOTSUPP;
+
+	if (size != I2C_SMBUS_BYTE_DATA)
+		return -EINVAL;
+
+	phy_write(phydev, MSCC_EXT_PAGE_ACCESS, MSCC_PHY_PAGE_EXTENDED_GPIO);
+
+	/* Configure ports muxing & clock speed */
+	phy_modify(phydev, MSCC_TWI_MUX_CTL1, TW_MUX_PORT_MASK | (0xf << 4),
+		   TW_MUX_PORT_EN(priv->addr) | (0x1 << 4));
+
+	/* Configure the PHY port address being addressed */
+	ret = phy_modify(phydev, MSCC_TWI_MUX_CTL2, 0x3 << 10, priv->addr << 10);
+	if (ret < 0)
+		goto out;
+
+	/* Set the module address */
+	ret = phy_modify(phydev, MSCC_TWI_MUX_CTL1, 0x7f << 9, addr << 9);
+	if (ret < 0)
+		goto out;
+
+	/* Wait for the bus to be ready */
+	ret = vsc8572_smbus_wait(phydev);
+	if (ret < 0)
+		goto out;
+
+	/* Set the address to read from / write to */
+	ret = phy_modify(phydev, MSCC_TWI_MUX_CTL2, 0xff, command);
+	if (ret < 0)
+		goto out;
+
+	switch (read_write) {
+	case I2C_SMBUS_READ:
+		ret = vsc8572_smbus_rx(phydev, &data->byte);
+		break;
+	case I2C_SMBUS_WRITE:
+		ret = vsc8572_smbus_tx(phydev, data->byte);
+		break;
+	}
+
+out:
+	phy_write(phydev, MSCC_EXT_PAGE_ACCESS, MSCC_PHY_PAGE_STANDARD);
+	return ret;
+}
+
+static u32 vsc8572_i2c_func(struct i2c_adapter *adapter)
+{
+	 return I2C_FUNC_SMBUS_BYTE_DATA;
+}
+
+static struct i2c_algorithm vsc8572_algo = {
+	 .smbus_xfer    = vsc8572_smbus_xfer,
+	 .functionality  = vsc8572_i2c_func,
+};
+
 static int vsc8584_config_init(struct phy_device *phydev)
 {
 	struct vsc8531_private *vsc8531 = phydev->priv;
@@ -1490,6 +1620,27 @@ static int vsc8584_config_init(struct phy_device *phydev)
 
 	for (i = 0; i < vsc8531->nleds; i++) {
 		ret = vsc85xx_led_cntl_set(phydev, i, vsc8531->leds_mode[i]);
+		if (ret)
+			return ret;
+	}
+
+	/* Do not initialize the i2c bus twice */
+	if (!vsc8531->i2c) {
+		vsc8531->i2c = devm_kzalloc(&phydev->mdio.dev,
+					    sizeof(*vsc8531->i2c), GFP_KERNEL);
+		if (!vsc8531->i2c)
+			return -ENOMEM;
+
+		vsc8531->i2c->owner = THIS_MODULE;
+		vsc8531->i2c->dev.of_node = phydev->mdio.dev.of_node;
+		vsc8531->i2c->algo = &vsc8572_algo;
+		vsc8531->i2c->algo_data = vsc8531;
+		vsc8531->i2c->timeout = msecs_to_jiffies(1000);
+		vsc8531->i2c->retries = 3;
+		vsc8531->i2c->dev.parent = &phydev->mdio.dev;
+		strcpy(vsc8531->i2c->name, "mdio-i2c");
+
+		ret = i2c_add_adapter(vsc8531->i2c);
 		if (ret)
 			return ret;
 	}
@@ -2141,6 +2292,7 @@ static int vsc8574_probe(struct phy_device *phydev)
 		return -ENOMEM;
 
 	phydev->priv = vsc8531;
+	vsc8531->phydev = phydev;
 
 	vsc8531->nleds = 4;
 	vsc8531->supp_led_modes = VSC8584_SUPP_LED_MODES;
@@ -2157,6 +2309,14 @@ static int vsc8574_probe(struct phy_device *phydev)
 
 	return phy_sfp_probe(phydev, &vsc8574_sfp_ops);
 }
+
+static void vsc8574_remove(struct phy_device *phydev)
+{
+	struct vsc8531_private *priv = phydev->priv;
+
+	i2c_del_adapter(priv->i2c);
+}
+
 
 static int vsc8584_probe(struct phy_device *phydev)
 {
@@ -2260,6 +2420,7 @@ static struct phy_driver vsc85xx_driver[] = {
 	.suspend	= &genphy_suspend,
 	.resume		= &genphy_resume,
 	.probe		= &vsc8574_probe,
+	.remove		= &vsc8574_remove,
 	.set_wol	= &vsc85xx_wol_set,
 	.get_wol	= &vsc85xx_wol_get,
 	.get_tunable	= &vsc85xx_get_tunable,
@@ -2404,6 +2565,7 @@ static struct phy_driver vsc85xx_driver[] = {
 	.suspend	= &genphy_suspend,
 	.resume		= &genphy_resume,
 	.probe		= &vsc8574_probe,
+	.remove		= &vsc8574_remove,
 	.set_wol	= &vsc85xx_wol_set,
 	.get_wol	= &vsc85xx_wol_get,
 	.get_tunable	= &vsc85xx_get_tunable,
@@ -2454,6 +2616,7 @@ static struct phy_driver vsc85xx_driver[] = {
 	.suspend	= &genphy_suspend,
 	.resume		= &genphy_resume,
 	.probe		= &vsc8574_probe,
+	.remove		= &vsc8574_remove,
 	.set_wol	= &vsc85xx_wol_set,
 	.get_wol	= &vsc85xx_wol_get,
 	.get_tunable	= &vsc85xx_get_tunable,
@@ -2480,6 +2643,7 @@ static struct phy_driver vsc85xx_driver[] = {
 	.suspend	= &genphy_suspend,
 	.resume		= &genphy_resume,
 	.probe		= &vsc8574_probe,
+	.remove		= &vsc8574_remove,
 	.set_wol	= &vsc85xx_wol_set,
 	.get_wol	= &vsc85xx_wol_get,
 	.get_tunable	= &vsc85xx_get_tunable,
