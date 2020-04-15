@@ -956,6 +956,9 @@ static const struct dev_pm_ops rga_pm = {
 
 static const struct of_device_id rockchip_rga_match[] = {
 	{
+		.compatible = "rockchip,px30-rga",
+	},
+	{
 		.compatible = "rockchip,rk3288-rga",
 	},
 	{
