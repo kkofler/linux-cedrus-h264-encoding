@@ -6,6 +6,7 @@ BitBLT, alpha blending and image blur/sharpness.
 
 Required properties:
 - compatible: value should be one of the following
+		"rockchip,px30-rga";
 		"rockchip,rk3288-rga";
 		"rockchip,rk3399-rga";
 
