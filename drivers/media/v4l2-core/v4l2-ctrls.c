@@ -883,6 +883,9 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS:		return "H264 Decode Parameters";
 	case V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE:		return "H264 Decode Mode";
 	case V4L2_CID_MPEG_VIDEO_H264_START_CODE:		return "H264 Start Code";
+	case V4L2_CID_MPEG_VIDEO_H264_ENCODE_PARAMS:		return "H264 Encode Parameters";
+	case V4L2_CID_MPEG_VIDEO_H264_ENCODE_RC:		return "H264 Encode Rate-Control";
+	case V4L2_CID_MPEG_VIDEO_H264_ENCODE_FEEDBACK:		return "H264 Encode Feedback";
 	case V4L2_CID_MPEG_VIDEO_MPEG2_LEVEL:			return "MPEG2 Level";
 	case V4L2_CID_MPEG_VIDEO_MPEG2_PROFILE:			return "MPEG2 Profile";
 	case V4L2_CID_MPEG_VIDEO_MPEG4_I_FRAME_QP:		return "MPEG4 I-Frame QP Value";
@@ -1395,6 +1398,15 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 	case V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS:
 		*type = V4L2_CTRL_TYPE_H264_DECODE_PARAMS;
 		break;
+	case V4L2_CID_MPEG_VIDEO_H264_ENCODE_PARAMS:
+		*type = V4L2_CTRL_TYPE_H264_ENCODE_PARAMS;
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_ENCODE_RC:
+		*type = V4L2_CTRL_TYPE_H264_ENCODE_RC;
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_ENCODE_FEEDBACK:
+		*type = V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK;
+		break;
 	case V4L2_CID_MPEG_VIDEO_VP8_FRAME_HEADER:
 		*type = V4L2_CTRL_TYPE_VP8_FRAME_HEADER;
 		break;
@@ -1773,6 +1785,9 @@ static int std_validate_compound(const struct v4l2_ctrl *ctrl, u32 idx,
 	case V4L2_CTRL_TYPE_H264_SCALING_MATRIX:
 	case V4L2_CTRL_TYPE_H264_SLICE_PARAMS:
 	case V4L2_CTRL_TYPE_H264_DECODE_PARAMS:
+	case V4L2_CTRL_TYPE_H264_ENCODE_PARAMS:
+	case V4L2_CTRL_TYPE_H264_ENCODE_RC:
+	case V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK:
 		break;
 
 	case V4L2_CTRL_TYPE_VP8_FRAME_HEADER:
@@ -2533,6 +2548,15 @@ static struct v4l2_ctrl *v4l2_ctrl_new(struct v4l2_ctrl_handler *hdl,
 		break;
 	case V4L2_CTRL_TYPE_H264_DECODE_PARAMS:
 		elem_size = sizeof(struct v4l2_ctrl_h264_decode_params);
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_PARAMS:
+		elem_size = sizeof(struct v4l2_ctrl_h264_encode_params);
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_RC:
+		elem_size = sizeof(struct v4l2_ctrl_h264_encode_rc);
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK:
+		elem_size = sizeof(struct v4l2_ctrl_h264_encode_feedback);
 		break;
 	case V4L2_CTRL_TYPE_VP8_FRAME_HEADER:
 		elem_size = sizeof(struct v4l2_ctrl_vp8_frame_header);

@@ -28,6 +28,9 @@
 #define V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS	(V4L2_CID_MPEG_BASE+1004)
 #define V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE	(V4L2_CID_MPEG_BASE+1005)
 #define V4L2_CID_MPEG_VIDEO_H264_START_CODE	(V4L2_CID_MPEG_BASE+1006)
+#define V4L2_CID_MPEG_VIDEO_H264_ENCODE_PARAMS	(V4L2_CID_MPEG_BASE+1027)
+#define V4L2_CID_MPEG_VIDEO_H264_ENCODE_RC	(V4L2_CID_MPEG_BASE+1028)
+#define V4L2_CID_MPEG_VIDEO_H264_ENCODE_FEEDBACK	(V4L2_CID_MPEG_BASE+1029)
 
 /* enum v4l2_ctrl_type type values */
 #define V4L2_CTRL_TYPE_H264_SPS			0x0110
@@ -35,6 +38,9 @@
 #define V4L2_CTRL_TYPE_H264_SCALING_MATRIX	0x0112
 #define V4L2_CTRL_TYPE_H264_SLICE_PARAMS	0x0113
 #define V4L2_CTRL_TYPE_H264_DECODE_PARAMS	0x0114
+#define V4L2_CTRL_TYPE_H264_ENCODE_PARAMS	0x0125
+#define V4L2_CTRL_TYPE_H264_ENCODE_RC		0x0126
+#define V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK	0x0127
 
 enum v4l2_mpeg_video_h264_decode_mode {
 	V4L2_MPEG_VIDEO_H264_DECODE_MODE_SLICE_BASED,
@@ -209,6 +215,56 @@ struct v4l2_ctrl_h264_decode_params {
 	__s32 top_field_order_cnt;
 	__s32 bottom_field_order_cnt;
 	__u32 flags; /* V4L2_H264_DECODE_PARAM_FLAG_* */
+};
+
+#define V4L2_H264_ENCODE_FLAG_ENTROPY_CODING_MODE	0x01
+#define V4L2_H264_ENCODE_FLAG_TRANSFORM_8X8_MODE	0x02
+#define V4L2_H264_ENCODE_FLAG_CONSTRAINED_INTRA_PRED	0x04
+
+struct v4l2_ctrl_h264_encode_params {
+	/* Slice parameters */
+
+	__u8 slice_type;
+	__u8 pic_parameter_set_id;
+	__u16 frame_num;
+	__u16 idr_pic_id;
+	__u8 cabac_init_idc;
+	__u8 disable_deblocking_filter_idc;
+	__s8 slice_alpha_c0_offset_div2;
+	__s8 slice_beta_offset_div2;
+
+	__s32 slice_size_mb_rows;
+
+	/* PPS parameters */
+
+	__s8 pic_init_qp_minus26;
+	__s8 chroma_qp_index_offset;
+
+	__u32 flags; /* V4L2_H264_ENCODE_FLAG_ */
+
+	/* Reference */
+
+	__u64 reference_ts;
+};
+
+struct v4l2_ctrl_h264_encode_rc {
+	__u32 qp;
+	__u32 qp_min;
+	__u32 qp_max;
+	__s32 mad_qp_delta;
+	__u32 mad_threshold;
+
+	__u32 cp_distance_mbs;
+	__u32 cp_target[10];
+	__s32 cp_target_error[6];
+	__s32 cp_qp_delta[7];
+};
+
+struct v4l2_ctrl_h264_encode_feedback {
+	__u32 qp_sum;
+	__u32 cp[10];
+	__u32 mad_count;
+	__u32 rlc_count;
 };
 
 #endif
