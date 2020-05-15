@@ -57,35 +57,21 @@ dma_addr_t hantro_get_ref(struct hantro_ctx *ctx, u64 ts)
 }
 
 static int
-hantro_enc_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *buf,
-		      unsigned int bytesused)
+hantro_enc_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *src_buf,
+		      struct vb2_buffer *dst_buf, unsigned int bytesused)
 {
-	size_t avail_size;
+	struct v4l2_ctrl_h264_encode_feedback *encode_feedback;
 
-	avail_size = vb2_plane_size(buf, 0) - ctx->vpu_dst_fmt->header_size;
-	if (bytesused > avail_size)
-		return -EINVAL;
-	/*
-	 * The bounce buffer is only for the JPEG encoder.
-	 * TODO: Rework the JPEG encoder to eliminate the need
-	 * for a bounce buffer.
-	 */
-	if (ctx->jpeg_enc.bounce_buffer.cpu) {
-		memcpy(vb2_plane_vaddr(buf, 0) +
-		       ctx->vpu_dst_fmt->header_size,
-		       ctx->jpeg_enc.bounce_buffer.cpu, bytesused);
-	}
-	buf->planes[0].bytesused =
-		ctx->vpu_dst_fmt->header_size + bytesused;
+	dst_buf->planes[0].bytesused = bytesused;
 	return 0;
 }
 
 static int
-hantro_dec_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *buf,
-		      unsigned int bytesused)
+hantro_dec_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *src_buf,
+		      struct vb2_buffer *dst_buf, unsigned int bytesused)
 {
 	/* For decoders set bytesused as per the output picture. */
-	buf->planes[0].bytesused = ctx->dst_fmt.plane_fmt[0].sizeimage;
+	dst_buf->planes[0].bytesused = ctx->dst_fmt.plane_fmt[0].sizeimage;
 	return 0;
 }
 
@@ -112,7 +98,7 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 	src->sequence = ctx->sequence_out++;
 	dst->sequence = ctx->sequence_cap++;
 
-	ret = ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
+	ret = ctx->buf_finish(ctx, &src->vb2_buf, &dst->vb2_buf, bytesused);
 	if (ret)
 		result = VB2_BUF_STATE_ERROR;
 
@@ -120,6 +106,37 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 	v4l2_m2m_buf_done(dst, result);
 
 	v4l2_m2m_job_finish(vpu->m2m_dev, ctx->fh.m2m_ctx);
+}
+
+static void hantro_job_done(struct hantro_dev *vpu, struct hantro_ctx *ctx,
+			    enum vb2_buffer_state result)
+{
+	struct vb2_v4l2_buffer *src_buf;
+
+	src_buf = hantro_get_src_buf(ctx);
+
+	if (ctx->codec_ops->done)
+		ctx->codec_ops->done(ctx, result);
+
+	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
+				   &ctx->ctrl_handler);
+}
+
+void hantro_thread_done(struct hantro_dev *vpu, unsigned int bytesused,
+			enum vb2_buffer_state result)
+{
+	struct hantro_ctx *ctx =
+		v4l2_m2m_get_curr_priv(vpu->m2m_dev);
+
+	/*
+	 * If cancel_delayed_work returns false
+	 * the timeout expired. The watchdog is running,
+	 * and will take care of finishing the job.
+	 */
+	if (cancel_delayed_work(&vpu->watchdog_work)) {
+		hantro_job_done(vpu, ctx, result);
+		hantro_job_finish(vpu, ctx, bytesused, result);
+	}
 }
 
 void hantro_irq_done(struct hantro_dev *vpu, unsigned int bytesused,
@@ -152,6 +169,13 @@ void hantro_watchdog(struct work_struct *work)
 	}
 }
 
+void hantro_watchdog_kick(struct hantro_ctx *ctx)
+{
+	/* Kick the watchdog. */
+	schedule_delayed_work(&ctx->dev->watchdog_work,
+			      msecs_to_jiffies(2000));
+}
+
 void hantro_prepare_run(struct hantro_ctx *ctx)
 {
 	struct vb2_v4l2_buffer *src_buf;
@@ -163,15 +187,14 @@ void hantro_prepare_run(struct hantro_ctx *ctx)
 
 void hantro_finish_run(struct hantro_ctx *ctx)
 {
+	struct v4l2_ctrl_h264_encode_feedback *encode_feedback;
 	struct vb2_v4l2_buffer *src_buf;
 
 	src_buf = hantro_get_src_buf(ctx);
 	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
 				   &ctx->ctrl_handler);
 
-	/* Kick the watchdog. */
-	schedule_delayed_work(&ctx->dev->watchdog_work,
-			      msecs_to_jiffies(2000));
+	hantro_watchdog_kick(ctx);
 }
 
 static void device_run(void *priv)
@@ -233,25 +256,17 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 	src_vq->dev = ctx->dev->v4l2_dev.dev;
 	src_vq->supports_requests = true;
 
+	if (hantro_is_encoder_ctx(ctx))
+		src_vq->buf_struct_size = sizeof(struct hantro_enc_buf);
+
 	ret = vb2_queue_init(src_vq);
 	if (ret)
 		return ret;
 
-	/*
-	 * When encoding, the CAPTURE queue doesn't need dma memory,
-	 * as the CPU needs to create the JPEG frames, from the
-	 * hardware-produced JPEG payload.
-	 *
-	 * For the DMA destination buffer, we use a bounce buffer.
-	 */
-	if (hantro_is_encoder_ctx(ctx)) {
-		dst_vq->mem_ops = &vb2_vmalloc_memops;
-	} else {
-		dst_vq->bidirectional = true;
-		dst_vq->mem_ops = &vb2_dma_contig_memops;
-		dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
-				    DMA_ATTR_NO_KERNEL_MAPPING;
-	}
+	dst_vq->bidirectional = true;
+	dst_vq->mem_ops = &vb2_dma_contig_memops;
+	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
+			    DMA_ATTR_NO_KERNEL_MAPPING;
 
 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
@@ -299,6 +314,22 @@ static const struct hantro_ctrl controls[] = {
 			.step = 1,
 			.def = 50,
 			.ops = &hantro_ctrl_ops,
+		},
+	}, {
+		.codec = HANTRO_H264_ENCODER,
+		.cfg = {
+			.id = V4L2_CID_MPEG_VIDEO_H264_ENCODE_PARAMS,
+		},
+	}, {
+		.codec = HANTRO_H264_ENCODER,
+		.cfg = {
+			.id = V4L2_CID_MPEG_VIDEO_H264_ENCODE_RC,
+		},
+	}, {
+		.codec = HANTRO_H264_ENCODER,
+		.cfg = {
+			.id = V4L2_CID_MPEG_VIDEO_H264_ENCODE_FEEDBACK,
+//			.flags = V4L2_CTRL_FLAG_READ_ONLY,
 		},
 	}, {
 		.codec = HANTRO_MPEG2_DECODER,
@@ -480,6 +511,7 @@ static const struct v4l2_file_operations hantro_fops = {
 
 static const struct of_device_id of_hantro_match[] = {
 #ifdef CONFIG_VIDEO_HANTRO_ROCKCHIP
+	{ .compatible = "rockchip,px30-vpu", .data = &px30_vpu_variant, },
 	{ .compatible = "rockchip,rk3399-vpu", .data = &rk3399_vpu_variant, },
 	{ .compatible = "rockchip,rk3328-vpu", .data = &rk3328_vpu_variant, },
 	{ .compatible = "rockchip,rk3288-vpu", .data = &rk3288_vpu_variant, },
@@ -800,9 +832,18 @@ static int hantro_probe(struct platform_device *pdev)
 		if (irq <= 0)
 			return -ENXIO;
 
-		ret = devm_request_irq(vpu->dev, irq,
-				       vpu->variant->irqs[i].handler, 0,
-				       dev_name(vpu->dev), vpu);
+		if (vpu->variant->irqs[i].thread)
+			ret = devm_request_threaded_irq(vpu->dev, irq,
+							vpu->variant->irqs[i].handler,
+							vpu->variant->irqs[i].thread,
+							IRQF_SHARED,
+							dev_name(vpu->dev),
+							vpu);
+		else
+			ret = devm_request_irq(vpu->dev, irq,
+					       vpu->variant->irqs[i].handler,
+					       IRQF_SHARED, dev_name(vpu->dev),
+					       vpu);
 		if (ret) {
 			dev_err(vpu->dev, "Could not request %s IRQ.\n",
 				irq_name);

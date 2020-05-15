@@ -34,6 +34,7 @@ struct hantro_ctx;
 struct hantro_codec_ops;
 
 #define HANTRO_JPEG_ENCODER	BIT(0)
+#define HANTRO_H264_ENCODER	BIT(1)
 #define HANTRO_ENCODERS		0x0000ffff
 #define HANTRO_MPEG2_DECODER	BIT(16)
 #define HANTRO_VP8_DECODER	BIT(17)
@@ -45,10 +46,12 @@ struct hantro_codec_ops;
  *
  * @name:			irq name for device tree lookup
  * @handler:			interrupt handler
+ * @thread:			interrupt thread (bottom half)
  */
 struct hantro_irq {
 	const char *name;
 	irqreturn_t (*handler)(int irq, void *priv);
+	irq_handler_t thread;
 };
 
 /**
@@ -94,12 +97,14 @@ struct hantro_variant {
  * enum hantro_codec_mode - codec operating mode.
  * @HANTRO_MODE_NONE:  No operating mode. Used for RAW video formats.
  * @HANTRO_MODE_JPEG_ENC: JPEG encoder.
+ * @HANTRO_MODE_H264_ENC: H264 encoder.
  * @HANTRO_MODE_H264_DEC: H264 decoder.
  * @HANTRO_MODE_MPEG2_DEC: MPEG-2 decoder.
  * @HANTRO_MODE_VP8_DEC: VP8 decoder.
  */
 enum hantro_codec_mode {
 	HANTRO_MODE_NONE = -1,
+	HANTRO_MODE_H264_ENC,
 	HANTRO_MODE_JPEG_ENC,
 	HANTRO_MODE_H264_DEC,
 	HANTRO_MODE_MPEG2_DEC,
@@ -192,6 +197,11 @@ struct hantro_dev {
 	struct delayed_work watchdog_work;
 };
 
+struct hantro_job_result {
+	unsigned int bytesused;
+	enum vb2_buffer_state state;
+};
+
 /**
  * struct hantro_ctx - Context (instance) private data.
  *
@@ -233,7 +243,8 @@ struct hantro_ctx {
 	int jpeg_quality;
 
 	int (*buf_finish)(struct hantro_ctx *ctx,
-			  struct vb2_buffer *buf,
+			  struct vb2_buffer *src_buf,
+			  struct vb2_buffer *dst_buf,
 			  unsigned int bytesused);
 
 	const struct hantro_codec_ops *codec_ops;
@@ -241,10 +252,13 @@ struct hantro_ctx {
 	/* Specific for particular codec modes. */
 	union {
 		struct hantro_h264_dec_hw_ctx h264_dec;
+		struct hantro_h264_enc_hw_ctx h264_enc;
 		struct hantro_jpeg_enc_hw_ctx jpeg_enc;
 		struct hantro_mpeg2_dec_hw_ctx mpeg2_dec;
 		struct hantro_vp8_dec_hw_ctx vp8_dec;
 	};
+
+	struct hantro_job_result result;
 };
 
 /**
@@ -379,6 +393,17 @@ static inline struct vb2_v4l2_buffer *
 hantro_get_dst_buf(struct hantro_ctx *ctx)
 {
 	return v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
+}
+
+static inline struct hantro_enc_buf *hantro_get_enc_buf(struct vb2_v4l2_buffer *v4l2_buf)
+{
+	struct v4l2_m2m_buffer *m2m_buf;
+	struct hantro_enc_buf *enc_buf;
+
+	m2m_buf = container_of(v4l2_buf, struct v4l2_m2m_buffer, vb);
+	enc_buf = container_of(m2m_buf, struct hantro_enc_buf, m2m_buf);
+
+	return enc_buf;
 }
 
 #endif /* HANTRO_H_ */

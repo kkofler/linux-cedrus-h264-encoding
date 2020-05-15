@@ -35,12 +35,31 @@ struct hantro_aux_buf {
 	size_t size;
 };
 
+struct hantro_enc_buf {
+	struct v4l2_m2m_buffer m2m_buf;
+	struct hantro_aux_buf rec_buf;
+};
+
 /**
  * struct hantro_jpeg_enc_hw_ctx
  * @bounce_buffer:	Bounce buffer
  */
 struct hantro_jpeg_enc_hw_ctx {
 	struct hantro_aux_buf bounce_buffer;
+};
+
+struct hantro_h264_enc_ctrls {
+	const  struct v4l2_ctrl_h264_encode_params *encode;
+	const  struct v4l2_ctrl_h264_encode_rc *rc;
+	struct v4l2_ctrl_h264_encode_feedback *feedback;
+};
+
+#define HANTRO_H264_ENC_CABAC_TABLE_COUNT	3
+#define HANTRO_H264_ENC_CABAC_TABLE_SIZE	(52 * 2 * 464)
+
+struct hantro_h264_enc_hw_ctx {
+	struct hantro_aux_buf cabac_table[HANTRO_H264_ENC_CABAC_TABLE_COUNT];
+	struct hantro_h264_enc_ctrls ctrls;
 };
 
 /* Max. number of entries in the DPB (HW limitation). */
@@ -125,7 +144,7 @@ struct hantro_codec_ops {
 	int (*init)(struct hantro_ctx *ctx);
 	void (*exit)(struct hantro_ctx *ctx);
 	void (*run)(struct hantro_ctx *ctx);
-	void (*done)(struct hantro_ctx *ctx, enum vb2_buffer_state);
+	void (*done)(struct hantro_ctx *ctx, enum vb2_buffer_state result);
 	void (*reset)(struct hantro_ctx *ctx);
 };
 
@@ -139,6 +158,7 @@ enum hantro_enc_fmt {
 	RK3288_VPU_ENC_FMT_UYVY422 = 3,
 };
 
+extern const struct hantro_variant px30_vpu_variant;
 extern const struct hantro_variant rk3399_vpu_variant;
 extern const struct hantro_variant rk3328_vpu_variant;
 extern const struct hantro_variant rk3288_vpu_variant;
@@ -146,7 +166,10 @@ extern const struct hantro_variant rk3288_vpu_variant;
 extern const u32 hantro_vp8_dec_mc_filter[8][6];
 
 void hantro_watchdog(struct work_struct *work);
+void hantro_watchdog_kick(struct hantro_ctx *ctx);
 void hantro_run(struct hantro_ctx *ctx);
+void hantro_thread_done(struct hantro_dev *vpu, unsigned int bytesused,
+			enum vb2_buffer_state result);
 void hantro_irq_done(struct hantro_dev *vpu, unsigned int bytesused,
 		     enum vb2_buffer_state result);
 void hantro_prepare_run(struct hantro_ctx *ctx);
@@ -156,6 +179,17 @@ void hantro_h1_jpeg_enc_run(struct hantro_ctx *ctx);
 void rk3399_vpu_jpeg_enc_run(struct hantro_ctx *ctx);
 int hantro_jpeg_enc_init(struct hantro_ctx *ctx);
 void hantro_jpeg_enc_exit(struct hantro_ctx *ctx);
+
+unsigned int hantro_h264_enc_rec_luma_size(unsigned int width,
+					   unsigned int height);
+unsigned int hantro_h264_enc_rec_image_size(unsigned int width,
+					    unsigned int height);
+int hantro_h264_enc_prepare_run(struct hantro_ctx *ctx);
+void rk3399_vpu_h264_enc_done(struct hantro_ctx *ctx,
+			      enum vb2_buffer_state result);
+void rk3399_vpu_h264_enc_run(struct hantro_ctx *ctx);
+int hantro_h264_enc_init(struct hantro_ctx *ctx);
+void hantro_h264_enc_exit(struct hantro_ctx *ctx);
 
 dma_addr_t hantro_h264_get_ref_buf(struct hantro_ctx *ctx,
 				   unsigned int dpb_idx);
