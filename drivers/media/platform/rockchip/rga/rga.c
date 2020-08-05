@@ -866,6 +866,13 @@ static int rga_probe(struct platform_device *pdev)
 		goto unreg_video_dev;
 	}
 
+	rga->media_dev.dev = rga->dev;
+	strscpy(rga->media_dev.model, RGA_NAME, sizeof(rga->media_dev.model));
+	strscpy(rga->media_dev.bus_info, "platform: " RGA_NAME,
+		sizeof(rga->media_dev.model));
+	media_device_init(&rga->media_dev);
+	rga->v4l2_dev.mdev = &rga->media_dev;
+
 	pm_runtime_get_sync(rga->dev);
 
 	rga->version.major = (rga_read(rga, RGA_VERSION_INFO) >> 24) & 0xFF;
@@ -898,9 +905,26 @@ static int rga_probe(struct platform_device *pdev)
 	v4l2_info(&rga->v4l2_dev, "Registered %s as /dev/%s\n",
 		  vfd->name, video_device_node_name(vfd));
 
+	ret = v4l2_m2m_register_media_controller(rga->m2m_dev, vfd,
+						 MEDIA_ENT_F_PROC_VIDEO_SCALER);
+	if (ret) {
+		v4l2_err(&rga->v4l2_dev,
+			 "Failed to register media controller\n");
+		goto rel_vdev;
+	}
+
+	ret = media_device_register(&rga->media_dev);
+	if (ret) {
+		v4l2_err(&rga->v4l2_dev, "Failed to register media device\n");
+		goto rel_media_elems;
+	}
+
 	return 0;
 
+rel_media_elems:
+	v4l2_m2m_unregister_media_controller(rga->m2m_dev);
 rel_vdev:
+	media_device_cleanup(&rga->media_dev);
 	video_device_release(vfd);
 unreg_video_dev:
 	video_unregister_device(rga->vfd);
@@ -923,6 +947,12 @@ static int rga_remove(struct platform_device *pdev)
 	free_pages((unsigned long)rga->dst_mmu_pages, 3);
 
 	v4l2_info(&rga->v4l2_dev, "Removing\n");
+
+	if (media_devnode_is_registered(rga->media_dev.devnode)) {
+		media_device_unregister(&rga->media_dev);
+		v4l2_m2m_unregister_media_controller(rga->m2m_dev);
+		media_device_cleanup(&rga->media_dev);
+	}
 
 	v4l2_m2m_release(rga->m2m_dev);
 	video_unregister_device(rga->vfd);

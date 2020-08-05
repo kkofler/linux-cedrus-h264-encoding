@@ -64,6 +64,7 @@ struct rockchip_rga {
 	struct v4l2_device v4l2_dev;
 	struct v4l2_m2m_dev *m2m_dev;
 	struct video_device *vfd;
+	struct media_device media_dev;
 
 	struct device *dev;
 	struct regmap *grf;
