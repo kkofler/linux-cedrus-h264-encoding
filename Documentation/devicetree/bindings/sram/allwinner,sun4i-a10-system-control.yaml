@@ -91,6 +91,9 @@ patternProperties:
                       - allwinner,sun50i-h6-sram-c1
                   - const: allwinner,sun4i-a10-sram-c1
               - items:
+                  - const: allwinner,sun8i-v3s-sram-c1
+                  - const: allwinner,sun4i-a10-sram-c1
+              - items:
                   - enum:
                       - allwinner,suniv-f1c100s-sram-d
                       - allwinner,sun5i-a13-sram-d
