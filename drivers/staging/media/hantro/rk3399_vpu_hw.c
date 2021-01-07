@@ -53,6 +53,19 @@ static const struct hantro_fmt rk3399_vpu_enc_fmts[] = {
 			.step_height = MB_DIM,
 		},
 	},
+	{
+		.fourcc = V4L2_PIX_FMT_H264_SLICE,
+		.codec_mode = HANTRO_MODE_H264_ENC,
+		.max_depth = 2,
+		.frmsize = {
+			.min_width = 96,
+			.max_width = 8192,
+			.step_width = MB_DIM,
+			.min_height = 32,
+			.max_height = 8192,
+			.step_height = MB_DIM,
+		},
+	},
 };
 
 static const struct hantro_fmt rk3399_vpu_dec_fmts[] = {
@@ -88,22 +101,36 @@ static const struct hantro_fmt rk3399_vpu_dec_fmts[] = {
 	},
 };
 
+static irqreturn_t rk3399_vepu_thread(int irq, void *dev_id)
+{
+	struct hantro_dev *vpu = dev_id;
+	struct hantro_ctx *ctx =
+		v4l2_m2m_get_curr_priv(vpu->m2m_dev);
+
+	hantro_thread_done(vpu, ctx->result);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rk3399_vepu_irq(int irq, void *dev_id)
 {
 	struct hantro_dev *vpu = dev_id;
+	struct hantro_ctx *ctx =
+		v4l2_m2m_get_curr_priv(vpu->m2m_dev);
 	enum vb2_buffer_state state;
 	u32 status;
+
 
 	status = vepu_read(vpu, VEPU_REG_INTERRUPT);
 	state = (status & VEPU_REG_INTERRUPT_FRAME_READY) ?
 		VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR;
 
+	ctx->result = state;
+
 	vepu_write(vpu, 0, VEPU_REG_INTERRUPT);
 	vepu_write(vpu, 0, VEPU_REG_AXI_CTRL);
 
-	hantro_irq_done(vpu, state);
-
-	return IRQ_HANDLED;
+	return IRQ_WAKE_THREAD;
 }
 
 static irqreturn_t rk3399_vdpu_irq(int irq, void *dev_id)
@@ -160,6 +187,13 @@ static const struct hantro_codec_ops rk3399_vpu_codec_ops[] = {
 		.init = hantro_jpeg_enc_init,
 		.exit = hantro_jpeg_enc_exit,
 	},
+	[HANTRO_MODE_H264_ENC] = {
+		.done = rk3399_vpu_h264_enc_done,
+		.run = rk3399_vpu_h264_enc_run,
+		.reset = rk3399_vpu_enc_reset,
+		.init = hantro_h264_enc_init,
+		.exit = hantro_h264_enc_exit,
+	},
 	[HANTRO_MODE_MPEG2_DEC] = {
 		.run = rk3399_vpu_mpeg2_dec_run,
 		.reset = rk3399_vpu_dec_reset,
@@ -179,7 +213,7 @@ static const struct hantro_codec_ops rk3399_vpu_codec_ops[] = {
  */
 
 static const struct hantro_irq rk3399_irqs[] = {
-	{ "vepu", rk3399_vepu_irq },
+	{ "vepu", rk3399_vepu_irq, rk3399_vepu_thread },
 	{ "vdpu", rk3399_vdpu_irq },
 };
 
@@ -194,8 +228,8 @@ const struct hantro_variant rk3399_vpu_variant = {
 	.dec_offset = 0x400,
 	.dec_fmts = rk3399_vpu_dec_fmts,
 	.num_dec_fmts = ARRAY_SIZE(rk3399_vpu_dec_fmts),
-	.codec = HANTRO_JPEG_ENCODER | HANTRO_MPEG2_DECODER |
-		 HANTRO_VP8_DECODER,
+	.codec = HANTRO_JPEG_ENCODER | HANTRO_H264_ENCODER |
+		 HANTRO_MPEG2_DECODER | HANTRO_VP8_DECODER,
 	.codec_ops = rk3399_vpu_codec_ops,
 	.irqs = rk3399_irqs,
 	.num_irqs = ARRAY_SIZE(rk3399_irqs),
@@ -232,8 +266,8 @@ const struct hantro_variant px30_vpu_variant = {
 	.dec_offset = 0x400,
 	.dec_fmts = rk3399_vpu_dec_fmts,
 	.num_dec_fmts = ARRAY_SIZE(rk3399_vpu_dec_fmts),
-	.codec = HANTRO_JPEG_ENCODER | HANTRO_MPEG2_DECODER |
-		 HANTRO_VP8_DECODER,
+	.codec = HANTRO_JPEG_ENCODER | HANTRO_H264_ENCODER |
+		 HANTRO_MPEG2_DECODER | HANTRO_VP8_DECODER,
 	.codec_ops = rk3399_vpu_codec_ops,
 	.irqs = rk3399_irqs,
 	.num_irqs = ARRAY_SIZE(rk3399_irqs),

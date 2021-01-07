@@ -81,6 +81,37 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 					 result);
 }
 
+static void hantro_job_done(struct hantro_dev *vpu, struct hantro_ctx *ctx,
+			    enum vb2_buffer_state result)
+{
+	struct vb2_v4l2_buffer *src_buf;
+
+	src_buf = hantro_get_src_buf(ctx);
+
+	if (result == VB2_BUF_STATE_DONE && ctx->codec_ops->done)
+		ctx->codec_ops->done(ctx);
+
+	if (ctx->is_encoder)
+		v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
+					   &ctx->ctrl_handler);
+}
+
+void hantro_thread_done(struct hantro_dev *vpu, enum vb2_buffer_state result)
+{
+	struct hantro_ctx *ctx =
+		v4l2_m2m_get_curr_priv(vpu->m2m_dev);
+
+	/*
+	 * If cancel_delayed_work returns false
+	 * the timeout expired. The watchdog is running,
+	 * and will take care of finishing the job.
+	 */
+	if (cancel_delayed_work(&vpu->watchdog_work)) {
+		hantro_job_done(vpu, ctx, result);
+		hantro_job_finish(vpu, ctx, result);
+	}
+}
+
 void hantro_irq_done(struct hantro_dev *vpu,
 		     enum vb2_buffer_state result)
 {
@@ -114,6 +145,13 @@ void hantro_watchdog(struct work_struct *work)
 	}
 }
 
+void hantro_watchdog_kick(struct hantro_ctx *ctx)
+{
+	/* Kick the watchdog. */
+	schedule_delayed_work(&ctx->dev->watchdog_work,
+			      msecs_to_jiffies(2000));
+}
+
 void hantro_start_prepare_run(struct hantro_ctx *ctx)
 {
 	struct vb2_v4l2_buffer *src_buf;
@@ -138,9 +176,7 @@ void hantro_end_prepare_run(struct hantro_ctx *ctx)
 	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
 				   &ctx->ctrl_handler);
 
-	/* Kick the watchdog. */
-	schedule_delayed_work(&ctx->dev->watchdog_work,
-			      msecs_to_jiffies(2000));
+	hantro_watchdog_kick(ctx);
 }
 
 static void device_run(void *priv)
@@ -197,25 +233,17 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 	src_vq->dev = ctx->dev->v4l2_dev.dev;
 	src_vq->supports_requests = true;
 
+	if (ctx->is_encoder)
+		src_vq->buf_struct_size = sizeof(struct hantro_enc_buf);
+
 	ret = vb2_queue_init(src_vq);
 	if (ret)
 		return ret;
 
-	/*
-	 * When encoding, the CAPTURE queue doesn't need dma memory,
-	 * as the CPU needs to create the JPEG frames, from the
-	 * hardware-produced JPEG payload.
-	 *
-	 * For the DMA destination buffer, we use a bounce buffer.
-	 */
-	if (ctx->is_encoder) {
-		dst_vq->mem_ops = &vb2_vmalloc_memops;
-	} else {
-		dst_vq->bidirectional = true;
-		dst_vq->mem_ops = &vb2_dma_contig_memops;
-		dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
-				    DMA_ATTR_NO_KERNEL_MAPPING;
-	}
+	dst_vq->bidirectional = true;
+	dst_vq->mem_ops = &vb2_dma_contig_memops;
+	dst_vq->dma_attrs = DMA_ATTR_ALLOC_SINGLE_PAGES |
+			    DMA_ATTR_NO_KERNEL_MAPPING;
 
 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	dst_vq->io_modes = VB2_MMAP | VB2_DMABUF;
@@ -285,6 +313,23 @@ static const struct hantro_ctrl controls[] = {
 			.step = 1,
 			.def = 50,
 			.ops = &hantro_jpeg_ctrl_ops,
+		},
+	}, {
+		.codec = HANTRO_H264_ENCODER,
+		.cfg = {
+			.id = V4L2_CID_STATELESS_H264_ENCODE_PARAMS,
+		},
+	}, {
+		.codec = HANTRO_H264_ENCODER,
+		.cfg = {
+			.id = V4L2_CID_STATELESS_H264_ENCODE_RC,
+		},
+	}, {
+		.codec = HANTRO_H264_ENCODER,
+		.cfg = {
+			.id = V4L2_CID_STATELESS_H264_ENCODE_FEEDBACK,
+			/* XXX: Maybe put the flag back and see. */
+//			.flags = V4L2_CTRL_FLAG_READ_ONLY,
 		},
 	}, {
 		.codec = HANTRO_MPEG2_DECODER,
@@ -796,9 +841,18 @@ static int hantro_probe(struct platform_device *pdev)
 		if (irq <= 0)
 			return -ENXIO;
 
-		ret = devm_request_irq(vpu->dev, irq,
-				       vpu->variant->irqs[i].handler,
-				       IRQF_SHARED, dev_name(vpu->dev), vpu);
+		if (vpu->variant->irqs[i].thread)
+			ret = devm_request_threaded_irq(vpu->dev, irq,
+							vpu->variant->irqs[i].handler,
+							vpu->variant->irqs[i].thread,
+							IRQF_SHARED,
+							dev_name(vpu->dev),
+							vpu);
+		else
+			ret = devm_request_irq(vpu->dev, irq,
+					       vpu->variant->irqs[i].handler,
+					       IRQF_SHARED, dev_name(vpu->dev),
+					       vpu);
 		if (ret) {
 			dev_err(vpu->dev, "Could not request %s IRQ.\n",
 				irq_name);
