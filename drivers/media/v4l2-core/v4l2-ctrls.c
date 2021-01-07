@@ -1184,6 +1184,9 @@ const char *v4l2_ctrl_get_name(u32 id)
 	case V4L2_CID_STATELESS_H264_PRED_WEIGHTS:		return "H264 Prediction Weight Table";
 	case V4L2_CID_STATELESS_H264_SLICE_PARAMS:		return "H264 Slice Parameters";
 	case V4L2_CID_STATELESS_H264_DECODE_PARAMS:		return "H264 Decode Parameters";
+	case V4L2_CID_STATELESS_H264_ENCODE_PARAMS:		return "H264 Encode Parameters";
+	case V4L2_CID_STATELESS_H264_ENCODE_RC:			return "H264 Encode Rate-Control";
+	case V4L2_CID_STATELESS_H264_ENCODE_FEEDBACK:		return "H264 Encode Feedback";
 	case V4L2_CID_STATELESS_FWHT_PARAMS:			return "FWHT Stateless Parameters";
 	default:
 		return NULL;
@@ -1453,6 +1456,15 @@ void v4l2_ctrl_fill(u32 id, const char **name, enum v4l2_ctrl_type *type,
 		break;
 	case V4L2_CID_STATELESS_H264_PRED_WEIGHTS:
 		*type = V4L2_CTRL_TYPE_H264_PRED_WEIGHTS;
+		break;
+	case V4L2_CID_STATELESS_H264_ENCODE_PARAMS:
+		*type = V4L2_CTRL_TYPE_H264_ENCODE_PARAMS;
+		break;
+	case V4L2_CID_STATELESS_H264_ENCODE_RC:
+		*type = V4L2_CTRL_TYPE_H264_ENCODE_RC;
+		break;
+	case V4L2_CID_STATELESS_H264_ENCODE_FEEDBACK:
+		*type = V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK;
 		break;
 	case V4L2_CID_MPEG_VIDEO_VP8_FRAME_HEADER:
 		*type = V4L2_CTRL_TYPE_VP8_FRAME_HEADER;
@@ -1762,6 +1774,15 @@ static void std_log(const struct v4l2_ctrl *ctrl)
 	case V4L2_CTRL_TYPE_H264_PRED_WEIGHTS:
 		pr_cont("H264_PRED_WEIGHTS");
 		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_PARAMS:
+		pr_cont("H264_ENCODE_PARAMS");
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_RC:
+		pr_cont("H264_ENCODE_RC");
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK:
+		pr_cont("H264_ENCODE_FEEDBACK");
+		break;
 	case V4L2_CTRL_TYPE_FWHT_PARAMS:
 		pr_cont("FWHT_PARAMS");
 		break;
@@ -2028,6 +2049,11 @@ static int std_validate_compound(const struct v4l2_ctrl *ctrl, u32 idx,
 			zero_reserved(*dpb_entry);
 		}
 		zero_reserved(*p_h264_dec_params);
+		break;
+
+	case V4L2_CTRL_TYPE_H264_ENCODE_PARAMS:
+	case V4L2_CTRL_TYPE_H264_ENCODE_RC:
+	case V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK:
 		break;
 
 	case V4L2_CTRL_TYPE_VP8_FRAME_HEADER:
@@ -2791,6 +2817,15 @@ static struct v4l2_ctrl *v4l2_ctrl_new(struct v4l2_ctrl_handler *hdl,
 		break;
 	case V4L2_CTRL_TYPE_H264_PRED_WEIGHTS:
 		elem_size = sizeof(struct v4l2_ctrl_h264_pred_weights);
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_PARAMS:
+		elem_size = sizeof(struct v4l2_ctrl_h264_encode_params);
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_RC:
+		elem_size = sizeof(struct v4l2_ctrl_h264_encode_rc);
+		break;
+	case V4L2_CTRL_TYPE_H264_ENCODE_FEEDBACK:
+		elem_size = sizeof(struct v4l2_ctrl_h264_encode_feedback);
 		break;
 	case V4L2_CTRL_TYPE_VP8_FRAME_HEADER:
 		elem_size = sizeof(struct v4l2_ctrl_vp8_frame_header);
