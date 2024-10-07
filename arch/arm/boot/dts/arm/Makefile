@@ -22,7 +22,8 @@ dtb-$(CONFIG_ARCH_REALVIEW) += \
 dtb-$(CONFIG_ARCH_VERSATILE) += \
 	versatile-ab.dtb \
 	versatile-ab-ib2.dtb \
-	versatile-pb.dtb
+	versatile-pb.dtb \
+	overlay1.dtbo
 dtb-$(CONFIG_ARCH_VEXPRESS) += \
 	vexpress-v2p-ca5s.dtb \
 	vexpress-v2p-ca9.dtb \

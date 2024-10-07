@@ -1,0 +1,51 @@
+/*
+ * Overlay reproducing the missing devlink between an LED class device
+ * consumer and a regulator supplier
+ * (https://lore.kernel.org/all/20240220133950.138452-1-herve.codina@bootlin.com/)
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	fragment@0 {
+		target-path = "/";
+
+		__overlay__ {
+			reg_addon_3v3_lcd: regulator-addon-3v3-lcd {
+				compatible = "regulator-fixed";
+				regulator-name = "3V3_LCD_ADDON";
+				gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>;
+			};
+
+			reg_addon_1v8: regulator-addon-1v8 {
+				compatible = "regulator-fixed";
+				regulator-name = "1V8_LCD";
+				vin-supply = <&reg_addon_3v3_lcd>;
+				gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>;
+			};
+
+			leds {
+				compatible = "gpio-leds";
+
+				vin-supply = <&reg_addon_1v8>;
+
+				led0: led-0 {
+					gpios = <&gpio3 2 GPIO_ACTIVE_LOW>;
+				};
+
+				led-1 {
+					gpios = <&gpio3 3 GPIO_ACTIVE_LOW>;
+				};
+			};
+
+			backlight {
+				compatible = "led-backlight";
+				leds = <&led0>;
+				vin-supply = <&reg_addon_3v3_lcd>;
+			};
+		};
+	};
+};
