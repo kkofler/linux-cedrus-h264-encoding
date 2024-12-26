@@ -12,3 +12,12 @@ sunxi-cedrus-y = cedrus.o \
 		 cedrus_enc_h264.o \
 		 cedrus_engine.o \
 		 cedrus_proc.o
+
+KERN_DIR=/lib/modules/$(shell uname -r)/build/
+
+host:
+	make -C $(KERN_DIR) M=$(PWD) CONFIG_VIDEO_SUNXI_CEDRUS=m modules
+clean:
+	make -C $(KERN_DIR) M=$(PWD) CONFIG_VIDEO_SUNXI_CEDRUS=m clean
+help:
+	make -C $(KERN_DIR) M=$(PWD) CONFIG_VIDEO_SUNXI_CEDRUS=m help
