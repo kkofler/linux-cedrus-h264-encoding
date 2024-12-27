@@ -534,6 +534,7 @@ static const struct cedrus_variant cedrus_variant_sun50i_a64 = {
 	.capabilities	= CEDRUS_CAPABILITY_UNTILED |
 			  CEDRUS_CAPABILITY_MPEG2_DEC |
 			  CEDRUS_CAPABILITY_H264_DEC |
+			  CEDRUS_CAPABILITY_H264_ENC |
 			  CEDRUS_CAPABILITY_H265_DEC |
 			  CEDRUS_CAPABILITY_VP8_DEC,
 	.clock_mod_rate	= 402000000,
